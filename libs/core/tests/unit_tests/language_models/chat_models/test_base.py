@@ -1217,3 +1217,47 @@ def test_get_ls_params() -> None:
 
     ls_params = llm._get_ls_params(stop=["stop"])
     assert ls_params["ls_stop"] == ["stop"]
+
+
+def test_error_handling_with_streaming_response() -> None:
+    """Test that streaming response errors don't mask the original exception.
+
+    This is a regression test for issue #33514, where accessing response.text
+    on a streaming httpx.Response raised ResponseNotRead, masking the original
+    APIStatusError.
+    """
+    from collections.abc import Iterator  # noqa: PLC0415
+
+    httpx = pytest.importorskip("httpx")
+    anthropic = pytest.importorskip("anthropic")
+
+    class MockErrorModel(BaseChatModel):
+        """Minimal chat model that raises APIStatusError with streaming response."""
+
+        @property
+        def _llm_type(self) -> str:
+            return "error_llm"
+
+        def _generate(
+            self,
+            messages: list[BaseMessage],  # noqa: ARG002
+            stop: list[str] | None = None,  # noqa: ARG002
+            run_manager: CallbackManagerForLLMRun | None = None,  # noqa: ARG002
+            **kwargs: Any,  # noqa: ARG002
+        ) -> ChatResult:
+            def mock_stream() -> Iterator[bytes]:
+                yield b'{"error": "mock error"}'
+
+            resp = httpx.Response(
+                status_code=400,
+                headers={"content-type": "application/json"},
+                request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+                stream=mock_stream(),
+            )
+            raise anthropic.APIStatusError(
+                message="Mock API error", response=resp, body=None
+            )
+
+    # The original exception should be raised, not ResponseNotRead
+    with pytest.raises(anthropic.APIStatusError, match="Mock API error"):
+        MockErrorModel().invoke([HumanMessage(content="test")])
