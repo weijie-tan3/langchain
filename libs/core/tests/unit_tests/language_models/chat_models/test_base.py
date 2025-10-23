@@ -1226,8 +1226,6 @@ def test_error_handling_with_streaming_response() -> None:
     on a streaming httpx.Response raised ResponseNotRead, masking the original
     APIStatusError.
     """
-    from collections.abc import Iterator  # noqa: PLC0415
-
     httpx = pytest.importorskip("httpx")
     anthropic = pytest.importorskip("anthropic")
 
